@@ -128,22 +128,6 @@
     log("送信(USB): " + ch);
   }
 
-  $("btConnect").onclick = async () => {
-    if (!("bluetooth" in navigator)) { log("このブラウザはBluetooth接続に対応していません。AndroidのChromeで開いてください", true); return; }
-    try {
-      const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
-      dev.addEventListener("gattserverdisconnected", () => { bleChar = null; $("conn").textContent = "Bluetoothが切れました"; log("Bluetoothが切れました。もう一度つないでください", true); });
-      const srv = await dev.gatt.connect();
-      const svc = await srv.getPrimaryService(SVC);
-      bleChar = await svc.getCharacteristic(RXC);
-      $("conn").textContent = "Bluetoothで接続しました";
-      log("Bluetoothで接続しました");
-    } catch (e) {
-      log("Bluetooth接続できませんでした: " + e.name + " / " + e.message, true);
-      $("conn").textContent = "Bluetooth接続できませんでした";
-    }
-  };
-
   $("connect").onclick = async () => {
     if (!("serial" in navigator)) { log("このブラウザはUSB接続(Web Serial)に対応していません。パソコンのChromeで開いてください", true); return; }
     try {
@@ -175,7 +159,7 @@
   $("connectBle").onclick = async () => {
     if (!("bluetooth" in navigator)) { log("このブラウザはBluetooth接続に対応していません。AndroidのChromeで、httpsのURLから開いてください", true); return; }
     try {
-      const dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "ZOO" }], optionalServices: [BLE_SERVICE] });
+      const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE] }] });
       dev.addEventListener("gattserverdisconnected", () => { bleChar = null; $("conn").textContent = "Bluetoothが切れました"; log("Bluetoothが切れました。もう一度接続してください", true); });
       const server = await dev.gatt.connect();
       const svc = await server.getPrimaryService(BLE_SERVICE);
