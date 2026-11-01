@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>動物判定 → XIAO</title>
+<style>
+  :root {
+    --bg: #f5f7f4; --ink: #1d2a24; --sub: #5d6b63; --line: #d5ddd7;
+    --card: #ffffff; --accent: #1f7a5a; --warn: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151b18; --ink: #e8efe9; --sub: #9aa8a0; --line: #2c3731; --card: #1e2622; --accent: #4cc79a; --warn: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; line-height: 1.6; }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 20px; color: var(--sub); font-size: 14px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  label { display: block; font-size: 13px; color: var(--sub); margin-bottom: 4px; }
+  input[type=text] { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font-size: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  button { padding: 10px 16px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #cam canvas { width: 100%; max-width: 400px; border-radius: 8px; display: block; }
+  .bar { display: grid; grid-template-columns: 90px 1fr 48px; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+  .track { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+  .fill { height: 100%; width: 0; background: var(--accent); }
+  #now { font-size: 28px; font-weight: 700; margin: 4px 0; }
+  #log { font-size: 12px; color: var(--sub); white-space: pre-wrap; max-height: 140px; overflow: auto; margin: 0; }
+  .err { color: var(--warn); }
+  ol { margin: 0; padding-left: 20px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>動物判定からXIAOへ</h1>
+  <p class="lead">カメラに写真をかざすと、動物を判定してXIAOに1文字を送ります。Chromeで開いてください。</p>
+
+  <section>
+    <h2>この環境の確認</h2>
+    <p id="env" style="font-size:13px;margin:0"></p>
+  </section>
+
+  <section>
+    <h2>手順</h2>
+    <ol>
+      <li>ArduinoのシリアルモニタをCloseする</li>
+      <li>Teachable Machineのモデルの共有リンクを貼り、「カメラを始める」を押す</li>
+      <li>「XIAOに接続」を押し、ポート（usbmodem）を選ぶ</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>1. モデルとカメラ</h2>
+    <label for="url">モデルのURL（https://teachablemachine.withgoogle.com/models/…/）</label>
+    <input type="text" id="url" placeholder="https://teachablemachine.withgoogle.com/models/XXXXXXXX/">
+    <div class="row"><button id="startCam">カメラを始める</button></div>
+    <label style="margin-top:8px"><input type="checkbox" id="rear"> 背面カメラを使う（スマホ用）</label>
+    <div id="cam" style="margin-top:12px"></div>
+  </section>
+
+  <section>
+    <h2>2. XIAOにつなぐ</h2>
+    <div class="row">
+      <button id="connect">XIAOにUSBで接続（パソコン）</button>
+      <button id="connectBle">Bluetoothで接続（スマホ）</button>
+      <button id="testH" class="ghost">人間を送る</button>
+      <button id="testD" class="ghost">犬を送る</button>
+      <button id="testC" class="ghost">猫を送る</button>
+      <button id="testF" class="ghost">カエルを送る</button>
+      <button id="testM" class="ghost">ネズミを送る</button>
+    </div>
+    <p id="conn" style="font-size:13px;color:var(--sub);margin:8px 0 0">未接続</p>
+  </section>
+
+  <section>
+    <h2>判定</h2>
+    <div id="now">-</div>
+    <div id="bars"></div>
+  </section>
+
+  <section>
+    <h2>ログ</h2>
+    <p id="log"></p>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.5/dist/teachablemachine-image.min.js"></script>
+<script>
+  // クラス名 → XIAOに送る1文字（Teachable Machineのクラス名と同じにしてください）
+  const MAP = { "人間": "H", "犬": "D", "猫": "C", "カエル": "F", "ネズミ": "M" };
+  const THRESH = 0.85;   // この確率以上で「見えた」とする
+  const HOLD_MS = 1000;  // 同じ判定がこの時間続いたら送る
+
+  let model, webcam, port, writer, bleChar;
+  const BLE_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+  const BLE_CHAR = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  let candidate = null, candidateSince = 0, sent = null;
+
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  $("env").innerHTML =
+    "ページの種類: " + location.protocol + "<br>" +
+    "安全な接続(カメラに必要): " + (window.isSecureContext ? "はい" : "<b class='err'>いいえ</b>") + "<br>" +
+    "USB接続(Web Serial): " + (("serial" in navigator) ? "使えます" : "<b class='err'>使えません（パソコンのChromeで開く）</b>") + "<br>" +
+    "Bluetooth接続(Web Bluetooth): " + (("bluetooth" in navigator) ? "使えます" : "<b class='err'>使えません</b>");
+  function log(msg, isErr) {
+    const t = new Date().toLocaleTimeString();
+    logEl.textContent = t + "  " + msg + "\n" + logEl.textContent;
+    if (isErr) console.error(msg);
+  }
+
+  async function send(ch) {
+    const data = new TextEncoder().encode(ch);
+    if (bleChar) {
+      try { await bleChar.writeValue(data); log("送信(Bluetooth): " + ch); }
+      catch (e) { log("送信できませんでした: " + e.message, true); }
+      return;
+    }
+    if (!writer) { log("XIAOにつながっていません。先に接続ボタンを押してください", true); return; }
+    await writer.write(data);
+    log("送信(USB): " + ch);
+  }
+
+  $("btConnect").onclick = async () => {
+    if (!("bluetooth" in navigator)) { log("このブラウザはBluetooth接続に対応していません。AndroidのChromeで開いてください", true); return; }
+    try {
+      const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+      dev.addEventListener("gattserverdisconnected", () => { bleChar = null; $("conn").textContent = "Bluetoothが切れました"; log("Bluetoothが切れました。もう一度つないでください", true); });
+      const srv = await dev.gatt.connect();
+      const svc = await srv.getPrimaryService(SVC);
+      bleChar = await svc.getCharacteristic(RXC);
+      $("conn").textContent = "Bluetoothで接続しました";
+      log("Bluetoothで接続しました");
+    } catch (e) {
+      log("Bluetooth接続できませんでした: " + e.name + " / " + e.message, true);
+      $("conn").textContent = "Bluetooth接続できませんでした";
+    }
+  };
+
+  $("connect").onclick = async () => {
+    if (!("serial" in navigator)) { log("このブラウザはUSB接続(Web Serial)に対応していません。パソコンのChromeで開いてください", true); return; }
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) { log("信号設定はスキップ: " + e.message); }
+      writer = port.writable.getWriter();
+      // XIAOからの文字をログに出す（「動物: 犬」などが見えれば届いている）
+      (async () => {
+        const reader = port.readable.getReader();
+        const dec = new TextDecoder(); let buf = "";
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value);
+            let i;
+            while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) log("XIAO: " + line); }
+          }
+        } catch (e) { log("受信が止まりました: " + e.message, true); }
+      })();
+      $("conn").textContent = "接続しました";
+      log("XIAOに接続しました。約5秒待ってから、テストボタンを押してください");
+    } catch (e) {
+      log("接続できませんでした: " + e.name + " / " + e.message, true);
+      $("conn").textContent = "接続できませんでした";
+    }
+  };
+  $("connectBle").onclick = async () => {
+    if (!("bluetooth" in navigator)) { log("このブラウザはBluetooth接続に対応していません。AndroidのChromeで、httpsのURLから開いてください", true); return; }
+    try {
+      const dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "ZOO" }], optionalServices: [BLE_SERVICE] });
+      dev.addEventListener("gattserverdisconnected", () => { bleChar = null; $("conn").textContent = "Bluetoothが切れました"; log("Bluetoothが切れました。もう一度接続してください", true); });
+      const server = await dev.gatt.connect();
+      const svc = await server.getPrimaryService(BLE_SERVICE);
+      bleChar = await svc.getCharacteristic(BLE_CHAR);
+      $("conn").textContent = "Bluetoothで接続しました";
+      log("Bluetoothで接続しました。テストボタンで確認できます");
+    } catch (e) {
+      log("Bluetoothで接続できませんでした: " + e.name + " / " + e.message, true);
+      $("conn").textContent = "接続できませんでした";
+    }
+  };
+  $("testH").onclick = () => send("H");
+  $("testD").onclick = () => send("D");
+  $("testC").onclick = () => send("C");
+  $("testF").onclick = () => send("F");
+  $("testM").onclick = () => send("M");
+
+  $("startCam").onclick = async () => {
+    let url = $("url").value.trim();
+    if (!url) { log("モデルのURLを入れてください", true); return; }
+    if (!url.endsWith("/")) url += "/";
+    try {
+      log("モデルを読み込み中…");
+      model = await tmImage.load(url + "model.json", url + "metadata.json");
+      webcam = new tmImage.Webcam(400, 400, true);
+      await webcam.setup($("rear").checked ? { facingMode: "environment" } : undefined);
+      await webcam.play();
+      $("cam").appendChild(webcam.canvas);
+      log("カメラを始めました");
+      requestAnimationFrame(loop);
+    } catch (e) {
+      log("開始できませんでした: " + e.message, true);
+    }
+  };
+
+  async function loop() {
+    webcam.update();
+    const preds = await model.predict(webcam.canvas);
+
+    $("bars").innerHTML = preds.map((p) =>
+      `<div class="bar"><span>${p.className}</span><div class="track"><div class="fill" style="width:${Math.round(p.probability * 100)}%"></div></div><span>${Math.round(p.probability * 100)}%</span></div>`
+    ).join("");
+
+    let best = preds[0];
+    for (const p of preds) if (p.probability > best.probability) best = p;
+    const now = performance.now();
+
+    if (best.probability >= THRESH) {
+      $("now").textContent = best.className;
+      if (best.className === candidate) {
+        if (now - candidateSince >= HOLD_MS && sent !== candidate) {
+          sent = candidate;
+          const ch = MAP[candidate];
+          if (ch) send(ch);   // 「何もなし」などMAPにないクラスは送らない
+        }
+      } else {
+        candidate = best.className;
+        candidateSince = now;
+      }
+    } else {
+      $("now").textContent = "-";
+      candidate = null;
+    }
+    // 動物以外（何もなし）が続いたら、次に同じ動物をかざしたとき再送できるようにする
+    if (best.probability >= THRESH && !MAP[best.className]) sent = best.className;
+
+    requestAnimationFrame(loop);
+  }
+</script>
+</body>
+</html>
