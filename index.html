@@ -73,7 +73,7 @@
       <button id="testD" class="ghost">犬を送る</button>
       <button id="testC" class="ghost">猫を送る</button>
       <button id="testF" class="ghost">カエルを送る</button>
-      <button id="testM" class="ghost">ネズミを送る</button>
+      <button id="testM" class="ghost">鳥を送る</button>
     </div>
     <p id="conn" style="font-size:13px;color:var(--sub);margin:8px 0 0">未接続</p>
   </section>
@@ -94,7 +94,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.5/dist/teachablemachine-image.min.js"></script>
 <script>
   // クラス名 → XIAOに送る1文字（Teachable Machineのクラス名と同じにしてください）
-  const MAP = { "人間": "H", "犬": "D", "猫": "C", "カエル": "F", "ネズミ": "M" };
+  const MAP = { "人間": "H", "犬": "D", "猫": "C", "カエル": "F", "鳥": "M" };
   const THRESH = 0.85;   // この確率以上で「見えた」とする
   const HOLD_MS = 1000;  // 同じ判定がこの時間続いたら送る
 
